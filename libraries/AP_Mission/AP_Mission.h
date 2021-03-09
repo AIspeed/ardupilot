@@ -510,7 +510,7 @@ public:
     // find the nearest landing sequence starting point (DO_LAND_START) and
     // return its index.  Returns 0 if no appropriate DO_LAND_START point can
     // be found.
-    uint16_t get_landing_sequence_start();
+    uint16_t get_landing_sequence_start() const;
 
     // find the nearest landing sequence starting point (DO_LAND_START) and
     // switch to that mission item.  Returns false if no DO_LAND_START
@@ -566,7 +566,7 @@ public:
     static const struct AP_Param::GroupInfo var_info[];
 
     // allow lua to get/set any WP items in any order in a mavlink-ish kinda way.
-    bool get_item(uint16_t index, mavlink_mission_item_int_t& result) ;
+    bool get_item(uint16_t index, mavlink_mission_item_int_t& result) const ;
     bool set_item(uint16_t index, mavlink_mission_item_int_t& source) ;
 
 private:
@@ -582,7 +582,7 @@ private:
         uint8_t do_cmd_loaded     : 1; // true if a "do"/"conditional" command has been loaded into _do_cmd
         uint8_t do_cmd_all_done   : 1; // true if all "do"/"conditional" commands have been completed (stops unnecessary searching through eeprom for do commands)
         bool in_landing_sequence  : 1; // true if the mission has jumped to a landing
-        bool resuming_mission     : 1; // true if the mission is resuming and set false once the aircraft attains the interupted WP
+        bool resuming_mission     : 1; // true if the mission is resuming and set false once the aircraft attains the interrupted WP
     } _flags;
 
     // mission WP resume history
@@ -696,6 +696,8 @@ private:
     bool start_command_camera(const AP_Mission::Mission_Command& cmd);
     bool start_command_parachute(const AP_Mission::Mission_Command& cmd);
     bool command_do_set_repeat_dist(const AP_Mission::Mission_Command& cmd);
+
+    bool start_command_do_sprayer(const AP_Mission::Mission_Command& cmd);
 };
 
 namespace AP

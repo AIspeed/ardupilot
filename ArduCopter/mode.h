@@ -21,7 +21,7 @@ public:
         RTL =           6,  // automatic return to launching point
         CIRCLE =        7,  // automatic circular flight with automatic throttle
         LAND =          9,  // automatic landing with horizontal position control
-        DRIFT =        11,  // semi-automous position, yaw and throttle control
+        DRIFT =        11,  // semi-autonomous position, yaw and throttle control
         SPORT =        13,  // manual earth-frame angular rate control with manual throttle
         FLIP =         14,  // automatically flip the vehicle on the roll axis
         AUTOTUNE =     15,  // automatically tune the vehicle's roll and pitch gains
@@ -210,16 +210,13 @@ public:
     private:
 
         float look_ahead_yaw();
-        float roi_yaw();
+        float roi_yaw() const;
 
         // auto flight mode's yaw mode
         uint8_t _mode = AUTO_YAW_LOOK_AT_NEXT_WP;
 
         // Yaw will point at this location if mode is set to AUTO_YAW_ROI
         Vector3f roi;
-
-        // bearing from current location to the ROI
-        float _roi_yaw;
 
         // yaw used for YAW_FIXED yaw_mode
         int32_t _fixed_yaw;
@@ -232,10 +229,6 @@ public:
 
         // turn rate (in cds) when auto_yaw_mode is set to AUTO_YAW_RATE
         float _rate_cds;
-
-        // used to reduce update rate to 100hz:
-        uint8_t roi_yaw_counter;
-
     };
     static AutoYaw auto_yaw;
 
@@ -474,7 +467,7 @@ private:
     bool verify_payload_place();
     bool verify_loiter_unlimited();
     bool verify_loiter_time(const AP_Mission::Mission_Command& cmd);
-    bool verify_loiter_to_alt();
+    bool verify_loiter_to_alt() const;
     bool verify_RTL();
     bool verify_wait_delay();
     bool verify_within_distance();
@@ -856,6 +849,7 @@ private:
 
     // controls which controller is run (pos or vel):
     GuidedMode guided_mode = Guided_TakeOff;
+    bool send_notification;     // used to send one time notification to ground station
 
 };
 
@@ -1068,7 +1062,7 @@ public:
     RTLState state() { return _state; }
 
     // this should probably not be exposed
-    bool state_complete() { return _state_complete; }
+    bool state_complete() const { return _state_complete; }
 
     virtual bool is_landing() const override;
 
@@ -1278,7 +1272,7 @@ protected:
 
 private:
 
-    void log_data();
+    void log_data() const;
     float waveform(float time);
 
     enum class AxisType {

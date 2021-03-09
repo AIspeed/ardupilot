@@ -98,6 +98,10 @@
 #include "afs_plane.h"
 #endif
 
+#if AC_FENCE == ENABLED
+#include <AC_Fence/AC_Fence.h>
+#endif
+
 // Local modules
 #include "defines.h"
 #include "mode.h"
@@ -256,7 +260,11 @@ private:
 #if OSD_ENABLED || OSD_PARAM_ENABLED
     AP_OSD osd;
 #endif
-    
+
+#if AC_FENCE == ENABLED
+    AC_Fence fence;
+#endif
+
     ModeCircle mode_circle;
     ModeStabilize mode_stabilize;
     ModeTraining mode_training;
@@ -289,9 +297,7 @@ private:
     // This is the state of the flight control system
     // There are multiple states defined such as MANUAL, FBW-A, AUTO
     Mode *control_mode = &mode_initializing;
-    ModeReason control_mode_reason = ModeReason::UNKNOWN;
     Mode *previous_mode = &mode_initializing;
-    ModeReason previous_mode_reason = ModeReason::UNKNOWN;
 
     // time of last mode change
     uint32_t last_mode_change_ms;
@@ -572,17 +578,6 @@ private:
         uint32_t impact_timer_ms;
     } crash_state;
 
-    // true if we are in an auto-throttle mode, which means
-    // we need to run the speed/height controller
-    bool auto_throttle_mode:1;
-
-    // true if we are in an auto-navigation mode, which controls whether control input is ignored
-    // with STICK_MIXING=0
-    bool auto_navigation_mode:1;
-    
-    // this allows certain flight modes to mix RC input with throttle depending on airspeed_nudge_cm
-    bool throttle_allows_nudging:1;
-
     // this controls throttle suppression in auto modes
     bool throttle_suppressed;
 	
@@ -798,7 +793,7 @@ private:
     void update_load_factor(void);
     void adjust_altitude_target();
     void setup_glide_slope(void);
-    int32_t get_RTL_altitude();
+    int32_t get_RTL_altitude() const;
     float relative_ground_altitude(bool use_rangefinder_if_available);
     void set_target_altitude_current(void);
     void set_target_altitude_current_adjusted(void);
@@ -812,7 +807,7 @@ private:
     void reset_offset_altitude(void);
     void set_offset_altitude_location(const Location &loc);
     bool above_location_current(const Location &loc);
-    void setup_terrain_target_alt(Location &loc);
+    void setup_terrain_target_alt(Location &loc) const;
     int32_t adjusted_altitude_cm(void);
     int32_t adjusted_relative_altitude_cm(void);
     float mission_alt_offset(void);
@@ -839,7 +834,6 @@ private:
     void calc_nav_yaw_ground(void);
 
     // GCS_Mavlink.cpp
-    void send_fence_status(mavlink_channel_t chan);
     void send_servo_out(mavlink_channel_t chan);
 
     // Log.cpp
@@ -915,7 +909,7 @@ private:
 
     // control_modes.cpp
     void read_control_switch();
-    uint8_t readSwitch(void);
+    uint8_t readSwitch(void) const;
     void reset_control_switch();
     void autotune_start(void);
     void autotune_restore(void);
@@ -931,25 +925,11 @@ private:
     void failsafe_long_off_event(ModeReason reason);
     void handle_battery_failsafe(const char* type_str, const int8_t action);
 
-    // geofence.cpp
-    uint8_t max_fencepoints(void) const;
-    Vector2l get_fence_point_with_index(uint8_t i) const;
-    void set_fence_point_with_index(const Vector2l &point, unsigned i);
-    void geofence_load(void);
-    bool geofence_present(void);
-    void geofence_update_pwm_enabled_state();
-    bool geofence_set_enabled(bool enable);
-    bool geofence_enabled(void);
-    bool geofence_set_floor_enabled(bool floor_enable);
-    bool geofence_check_minalt(void);
-    bool geofence_check_maxalt(void);
-    void geofence_check(bool altitude_check_only);
-    bool geofence_prearm_check(void);
-    bool geofence_stickmixing(void);
-    void geofence_send_status(mavlink_channel_t chan);
-    bool geofence_breached(void);
-    void geofence_disable_and_send_error_msg(const char *errorMsg);
-    void disable_fence_for_landing(void);
+#if AC_FENCE == ENABLED
+    // fence.cpp
+    void fence_check();
+    bool fence_stickmixing() const;
+#endif
 
     // ArduPlane.cpp
     void disarm_if_autoland_complete();
@@ -968,6 +948,7 @@ private:
     void afs_fs_check(void);
 #endif
     void one_second_loop(void);
+    void three_hz_loop(void);
 #if AP_AIRSPEED_AUTOCAL_ENABLE
     void airspeed_ratio_update(void);
 #endif 
@@ -1031,7 +1012,6 @@ private:
     int8_t takeoff_tail_hold(void);
     int16_t get_takeoff_pitch_min_cd(void);
     void landing_gear_update(void);
-    void complete_auto_takeoff(void);
 
     // avoidance_adsb.cpp
     void avoidance_adsb_update(void);
@@ -1051,13 +1031,13 @@ private:
     void servos_auto_trim(void);
     void servos_twin_engine_mix();
     void force_flare();
-    void throttle_voltage_comp(int8_t &min_throttle, int8_t &max_throttle);
+    void throttle_voltage_comp(int8_t &min_throttle, int8_t &max_throttle) const;
     void throttle_watt_limiter(int8_t &min_throttle, int8_t &max_throttle);
     void throttle_slew_limit(SRV_Channel::Aux_servo_function_t func);
     bool suppress_throttle(void);
     void update_throttle_hover();
     void channel_function_mixer(SRV_Channel::Aux_servo_function_t func1_in, SRV_Channel::Aux_servo_function_t func2_in,
-                                SRV_Channel::Aux_servo_function_t func1_out, SRV_Channel::Aux_servo_function_t func2_out);
+                                SRV_Channel::Aux_servo_function_t func1_out, SRV_Channel::Aux_servo_function_t func2_out) const;
     void flaperon_update(int8_t flap_percent);
 
     // is_flying.cpp

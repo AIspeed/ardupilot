@@ -192,7 +192,10 @@ static void main_loop()
     ChibiOS::I2CBus::clear_all();
 #endif
 
+#ifndef HAL_NO_SHARED_DMA
     ChibiOS::Shared_DMA::init();
+#endif
+
     peripheral_power_enable();
 
     hal.serial(0)->begin(115200);
@@ -220,6 +223,10 @@ static void main_loop()
     schedulerInstance.hal_initialized();
 
     g_callbacks->setup();
+
+#if HAL_ENABLE_SAVE_PERSISTENT_PARAMS
+    utilInstance.apply_persistent_params();
+#endif
 
 #ifdef IOMCU_FW
     stm32_watchdog_init();

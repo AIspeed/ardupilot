@@ -363,6 +363,12 @@ bool AP_Arming::ins_checks(bool report)
             return false;
         }
 
+        // no arming while doing temp cal
+        if (ins.temperature_cal_running()) {
+            check_failed(ARMING_CHECK_INS, report, "temperature cal running");
+            return false;
+        }
+        
         // check AHRS attitudes are consistent
         char failure_msg[50] = {};
         if (!AP::ahrs().attitudes_consistent(failure_msg, ARRAY_SIZE(failure_msg))) {
@@ -1135,7 +1141,8 @@ bool AP_Arming::pre_arm_checks(bool report)
         &  osd_checks(report)
         &  visodom_checks(report)
         &  aux_auth_checks(report)
-        &  disarm_switch_checks(report);
+        &  disarm_switch_checks(report)
+        &  fence_checks(report);
 }
 
 bool AP_Arming::arm_checks(AP_Arming::Method method)
@@ -1159,6 +1166,14 @@ bool AP_Arming::arm_checks(AP_Arming::Method method)
         (checks_to_perform & ARMING_CHECK_GPS_CONFIG)) {
         if (!AP::gps().prepare_for_arming()) {
             return false;
+        }
+    }
+
+    AC_Fence *fence = AP::fence();
+    if (fence != nullptr) {
+        // If a fence is set to auto-enable, turn on the fence
+        if(fence->auto_enabled() == AC_Fence::AutoEnable::ONLY_WHEN_ARMED) {
+            fence->enable(true);
         }
     }
     
@@ -1204,7 +1219,7 @@ bool AP_Arming::arm(AP_Arming::Method method, const bool do_arming_checks)
 }
 
 //returns true if disarming occurred successfully
-bool AP_Arming::disarm(const AP_Arming::Method method)
+bool AP_Arming::disarm(const AP_Arming::Method method, bool do_disarm_checks)
 {
     if (!armed) { // already disarmed
         return false;
@@ -1228,6 +1243,13 @@ bool AP_Arming::disarm(const AP_Arming::Method method)
         fft->save_params_on_disarm();
     }
 #endif
+
+    AC_Fence *fence = AP::fence();
+    if (fence != nullptr) {
+        if(fence->auto_enabled() == AC_Fence::AutoEnable::ONLY_WHEN_ARMED) {
+            fence->enable(false);
+        }
+    }
 
     return true;
 }
@@ -1254,11 +1276,11 @@ bool AP_Arming::rc_checks_copter_sub(const bool display_failure, const RC_Channe
         const RC_Channel *channel = channels[i];
         const char *channel_name = channel_names[i];
         // check if radio has been calibrated
-        if (channel->get_radio_min() > 1300) {
+        if (channel->get_radio_min() > RC_Channel::RC_CALIB_MIN_LIMIT_PWM) {
             check_failed(ARMING_CHECK_RC, display_failure, "%s radio min too high", channel_name);
             ret = false;
         }
-        if (channel->get_radio_max() < 1700) {
+        if (channel->get_radio_max() < RC_Channel::RC_CALIB_MAX_LIMIT_PWM) {
             check_failed(ARMING_CHECK_RC, display_failure, "%s radio max too low", channel_name);
             ret = false;
         }

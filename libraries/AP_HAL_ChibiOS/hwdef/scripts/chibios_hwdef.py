@@ -679,7 +679,7 @@ def write_mcu_config(f):
     if get_config('PROCESS_STACK', required=False):
         env_vars['PROCESS_STACK'] = get_config('PROCESS_STACK')
     else:
-        env_vars['PROCESS_STACK'] = "0x2000"
+        env_vars['PROCESS_STACK'] = "0x1C00"
 
     # MAIN_STACK is location of initial stack on startup and is also the stack
     # used for slow interrupts. It needs to be big enough for maximum interrupt
@@ -824,6 +824,10 @@ def write_mcu_config(f):
 #define HAL_USE_I2C FALSE
 #define HAL_USE_PWM FALSE
 #define CH_DBG_ENABLE_STACK_CHECK FALSE
+// avoid timer and RCIN threads to save memory
+#define HAL_NO_TIMER_THREAD
+#define HAL_NO_RCOUT_THREAD
+#define HAL_NO_RCIN_THREAD
 ''')
     if env_vars.get('ROMFS_UNCOMPRESSED', False):
         f.write('#define HAL_ROMFS_UNCOMPRESSED\n')
@@ -1214,6 +1218,7 @@ def write_UART_config(f):
         tx_line = make_line(dev + '_TX')
         rx_line = make_line(dev + '_RX')
         rts_line = make_line(dev + '_RTS')
+        cts_line = make_line(dev + '_CTS')
         if rts_line != "0":
             have_rts_cts = True
             f.write('#define HAL_HAVE_RTSCTS_SERIAL%u\n' % uart_serial_num[dev])
@@ -1234,10 +1239,10 @@ def write_UART_config(f):
                 "#define HAL_%s_CONFIG { (BaseSequentialStream*) &SD%u, %u, false, "
                 % (dev, n, n))
             if mcu_series.startswith("STM32F1"):
-                f.write("%s, %s, %s, " % (tx_line, rx_line, rts_line))
+                f.write("%s, %s, %s, %s, " % (tx_line, rx_line, rts_line, cts_line))
             else:
-                f.write("STM32_%s_RX_DMA_CONFIG, STM32_%s_TX_DMA_CONFIG, %s, %s, %s, " %
-                        (dev, dev, tx_line, rx_line, rts_line))
+                f.write("STM32_%s_RX_DMA_CONFIG, STM32_%s_TX_DMA_CONFIG, %s, %s, %s, %s, " %
+                        (dev, dev, tx_line, rx_line, rts_line, cts_line))
 
             # add inversion pins, if any
             f.write("%d, " % get_gpio_bylabel(dev + "_RXINV"))
@@ -1357,14 +1362,15 @@ def parse_timer(str):
         error("Bad timer definition %s" % str)
 
 
-def write_PWM_config(f):
+def write_PWM_config(f, ordered_timers):
     '''write PWM config defines'''
     rc_in = None
     rc_in_int = None
     alarm = None
     bidir = None
     pwm_out = []
-    pwm_timers = []
+    # start with the ordered list from the dma resolver
+    pwm_timers = ordered_timers
     has_bidir = False
     for l in bylabel.keys():
         p = bylabel[l]
@@ -1382,6 +1388,7 @@ def write_PWM_config(f):
                     bidir = p
                 if p.type not in pwm_timers:
                     pwm_timers.append(p.type)
+
 
     f.write('#define HAL_PWM_COUNT %u\n' % len(pwm_out))
     if not pwm_out and not alarm:
@@ -1466,7 +1473,7 @@ def write_PWM_config(f):
     f.write('// PWM timer config\n')
     if bidir is not None:
         f.write('#define HAL_WITH_BIDIR_DSHOT\n')
-    for t in sorted(pwm_timers):
+    for t in pwm_timers:
         n = int(t[3:])
         f.write('#define STM32_PWM_USE_TIM%u TRUE\n' % n)
         f.write('#define STM32_TIM%u_SUPPRESS_ISR\n' % n)
@@ -1474,7 +1481,8 @@ def write_PWM_config(f):
     f.write('// PWM output config\n')
     groups = []
     have_complementary = False
-    for t in sorted(pwm_timers):
+
+    for t in pwm_timers:
         group = len(groups) + 1
         n = int(t[3:])
         chan_list = [255, 255, 255, 255]
@@ -1756,13 +1764,13 @@ def write_hwdef_header(outfilename):
 
     write_peripheral_enable(f)
 
-    dma_unassigned = dma_resolver.write_dma_header(f, periph_list, mcu_type,
+    dma_unassigned, ordered_timers = dma_resolver.write_dma_header(f, periph_list, mcu_type,
                                                    dma_exclude=get_dma_exclude(periph_list),
                                                    dma_priority=get_config('DMA_PRIORITY', default='TIM* SPI*', spaces=True),
                                                    dma_noshare=get_config('DMA_NOSHARE', default='', spaces=True))
 
     if not args.bootloader:
-        write_PWM_config(f)
+        write_PWM_config(f, ordered_timers)
         write_I2C_config(f)
         write_UART_config(f)
     else:
@@ -2053,27 +2061,30 @@ def process_line(line):
     elif a[0] == 'ROMFS_WILDCARD':
         romfs_wildcard(a[1])
     elif a[0] == 'undef':
-        print("Removing %s" % a[1])
-        config.pop(a[1], '')
-        bytype.pop(a[1], '')
-        bylabel.pop(a[1], '')
-        # also remove all occurences of defines in previous lines if any
-        for line in alllines[:]:
-            if line.startswith('define') and a[1] == line.split()[1]:
-                alllines.remove(line)
-        newpins = []
-        for pin in allpins:
-            if pin.type == a[1] or pin.label == a[1] or pin.portpin == a[1]:
-                portmap[pin.port][pin.pin] = generic_pin(pin.port, pin.pin, None, 'INPUT', [])
-                continue
-            newpins.append(pin)
-        allpins = newpins
-        if a[1] == 'IMU':
-            imu_list = []
-        if a[1] == 'COMPASS':
-            compass_list = []
-        if a[1] == 'BARO':
-            baro_list = []
+        for u in a[1:]:
+            print("Removing %s" % u)
+            config.pop(u, '')
+            bytype.pop(u, '')
+            bylabel.pop(u, '')
+            # also remove all occurences of defines in previous lines if any
+            for line in alllines[:]:
+                if line.startswith('define') and u == line.split()[1]:
+                    alllines.remove(line)
+            newpins = []
+            for pin in allpins:
+                if pin.type == u or pin.label == u or pin.portpin == u:
+                    if pin.label is not None:
+                        bylabel.pop(pin.label, '')
+                    portmap[pin.port][pin.pin] = generic_pin(pin.port, pin.pin, None, 'INPUT', [])
+                    continue
+                newpins.append(pin)
+            allpins = newpins
+            if u == 'IMU':
+                imu_list = []
+            if u == 'COMPASS':
+                compass_list = []
+            if u == 'BARO':
+                baro_list = []
     elif a[0] == 'env':
         print("Adding environment %s" % ' '.join(a[1:]))
         if len(a[1:]) < 2:
@@ -2088,6 +2099,7 @@ def process_file(filename):
     except Exception:
         error("Unable to open file %s" % filename)
     for line in f.readlines():
+        line = line.split('#')[0] # ensure we discard the comments
         line = line.strip()
         if len(line) == 0 or line[0] == '#':
             continue

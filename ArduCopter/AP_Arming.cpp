@@ -56,8 +56,7 @@ bool AP_Arming_Copter::run_pre_arm_checks(bool display_failure)
         return mandatory_checks(display_failure);
     }
 
-    return fence_checks(display_failure)
-        & parameter_checks(display_failure)
+    return parameter_checks(display_failure)
         & motor_checks(display_failure)
         & pilot_throttle_checks(display_failure)
         & oa_checks(display_failure)
@@ -134,11 +133,6 @@ bool AP_Arming_Copter::board_voltage_checks(bool display_failure)
     if ((checks_to_perform == ARMING_CHECK_ALL) || (checks_to_perform & ARMING_CHECK_VOLTAGE)) {
         if (copter.battery.has_failsafed()) {
             check_failed(ARMING_CHECK_VOLTAGE, display_failure, "Battery failsafe");
-            return false;
-        }
-
-        // call parent battery checks
-        if (!AP_Arming::battery_checks(display_failure)) {
             return false;
         }
     }
@@ -236,37 +230,38 @@ bool AP_Arming_Copter::parameter_checks(bool display_failure)
 #if MODE_RTL_ENABLED == ENABLED
         if (copter.mode_rtl.get_alt_type() == ModeRTL::RTLAltType::RTL_ALTTYPE_TERRAIN) {
             // get terrain source from wpnav
+            const char *failure_template = "RTL_ALT_TYPE is above-terrain but %s";
             switch (copter.wp_nav->get_terrain_source()) {
             case AC_WPNav::TerrainSource::TERRAIN_UNAVAILABLE:
-                check_failed(ARMING_CHECK_PARAMETERS, display_failure, "RTL_ALT_TYPE=1 but no terrain data");
+                check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "no terrain data");
                 return false;
                 break;
             case AC_WPNav::TerrainSource::TERRAIN_FROM_RANGEFINDER:
                 if (!copter.rangefinder_state.enabled || !copter.rangefinder.has_orientation(ROTATION_PITCH_270)) {
-                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, "RTL_ALT_TYPE=1 but no rangefinder");
+                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "no rangefinder");
                     return false;
                 }
                 // check if RTL_ALT is higher than rangefinder's max range
                 if (copter.g.rtl_altitude > copter.rangefinder.max_distance_cm_orient(ROTATION_PITCH_270)) {
-                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, "RTL_ALT_TYPE=1 but RTL_ALT>RNGFND_MAX_CM");
+                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "RTL_ALT>RNGFND_MAX_CM");
                     return false;
                 }
                 break;
             case AC_WPNav::TerrainSource::TERRAIN_FROM_TERRAINDATABASE:
 #if AP_TERRAIN_AVAILABLE && AC_TERRAIN
                 if (!copter.terrain.enabled()) {
-                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, "RTL_ALT_TYPE=1 but terrain disabled");
+                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "terrain disabled");
                     return false;
                 }
                 // check terrain data is loaded
                 uint16_t terr_pending, terr_loaded;
                 copter.terrain.get_statistics(terr_pending, terr_loaded);
                 if (terr_pending != 0) {
-                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, "RTL_ALT_TYPE=1, waiting for terrain data");
+                    check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "waiting for terrain data");
                     return false;
                 }
 #else
-                check_failed(ARMING_CHECK_PARAMETERS, display_failure, "RTL_ALT_TYPE=1 but terrain disabled");
+                check_failed(ARMING_CHECK_PARAMETERS, display_failure, failure_template, "terrain disabled");
                 return false;
 #endif
                 break;
@@ -511,16 +506,16 @@ bool AP_Arming_Copter::proximity_checks(bool display_failure) const
 // performs mandatory gps checks.  returns true if passed
 bool AP_Arming_Copter::mandatory_gps_checks(bool display_failure)
 {
+    // check if flight mode requires GPS
+    bool mode_requires_gps = copter.flightmode->requires_GPS();
+
     // always check if inertial nav has started and is ready
     const AP_AHRS_NavEKF &ahrs = AP::ahrs_navekf();
     char failure_msg[50] = {};
-    if (!ahrs.pre_arm_check(failure_msg, sizeof(failure_msg))) {
+    if (!ahrs.pre_arm_check(mode_requires_gps, failure_msg, sizeof(failure_msg))) {
         check_failed(display_failure, "AHRS: %s", failure_msg);
         return false;
     }
-
-    // check if flight mode requires GPS
-    bool mode_requires_gps = copter.flightmode->requires_GPS();
 
     // check if fence requires GPS
     bool fence_requires_gps = false;
@@ -872,14 +867,21 @@ bool AP_Arming_Copter::arm(const AP_Arming::Method method, const bool do_arming_
 }
 
 // arming.disarm - disarm motors
-bool AP_Arming_Copter::disarm(const AP_Arming::Method method)
+bool AP_Arming_Copter::disarm(const AP_Arming::Method method, bool do_disarm_checks)
 {
     // return immediately if we are already disarmed
     if (!copter.motors->armed()) {
         return true;
     }
 
-    if (!AP_Arming::disarm(method)) {
+    // do not allow disarm via mavlink if we think we are flying:
+    if (do_disarm_checks &&
+        method == AP_Arming::Method::MAVLINK &&
+        !copter.ap.land_complete) {
+        return false;
+    }
+
+    if (!AP_Arming::disarm(method, do_disarm_checks)) {
         return false;
     }
 
